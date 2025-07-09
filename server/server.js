@@ -23,11 +23,24 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Connect to database
-connectDB();
-
 // Ensure uploads directory exists
-fs.ensureDirSync('uploads');
+const uploadsDir = path.join(process.cwd(), 'uploads');
+fs.ensureDirSync(uploadsDir);
+console.log('Uploads directory ensured:', uploadsDir);
+
+// Connect to database
+console.log('Starting server...');
+console.log('Environment:', process.env.NODE_ENV);
+console.log('MongoDB URI configured:', !!process.env.MONGODB_URI);
+
+connectDB()
+  .then(() => {
+    console.log('Database connected successfully, starting server...');
+  })
+  .catch((error) => {
+    console.error('Failed to connect to database:', error.message);
+    console.log('Server will continue without database connection');
+  });
 
 // Security middleware
 app.use(helmet({
@@ -75,7 +88,8 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: 'Server is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV
+    environment: process.env.NODE_ENV,
+    uploadsDir: uploadsDir
   });
 });
 
@@ -85,7 +99,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/stats', statsRoutes);
 
 // Serve uploaded files (protected route for admin)
-app.use('/api/uploads', express.static('uploads'));
+app.use('/api/uploads', express.static(uploadsDir));
 
 // 404 handler for API routes
 app.use('/api/*', (req, res) => {
@@ -110,7 +124,8 @@ app.use((error, req, res, next) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
-  console.log(`MongoDB URI: ${process.env.MONGODB_URI ? 'Connected' : 'Not configured'}`);
+  console.log(`Uploads directory: ${uploadsDir}`);
+  console.log(`MongoDB URI configured: ${!!process.env.MONGODB_URI}`);
 });
 
 // Graceful shutdown

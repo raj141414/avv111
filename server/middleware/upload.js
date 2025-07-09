@@ -4,7 +4,10 @@ import fs from 'fs-extra';
 import { v4 as uuidv4 } from 'uuid';
 
 // Ensure upload directory exists
-const uploadDir = 'uploads';
+const uploadDir = path.join(process.cwd(), 'uploads');
+console.log('Upload directory:', uploadDir);
+
+// Create uploads directory if it doesn't exist
 fs.ensureDirSync(uploadDir);
 
 // Configure multer for file uploads
@@ -15,12 +18,19 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     // Generate unique filename with timestamp and UUID
     const uniqueName = `${Date.now()}-${uuidv4()}${path.extname(file.originalname)}`;
+    console.log('Saving file as:', uniqueName);
     cb(null, uniqueName);
   }
 });
 
 // File filter to allow only specific file types
 const fileFilter = (req, file, cb) => {
+  console.log('File upload attempt:', {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  });
+
   const allowedTypes = [
     'application/pdf',
     'application/msword',
@@ -30,6 +40,7 @@ const fileFilter = (req, file, cb) => {
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
+    console.log('File type rejected:', file.mimetype);
     cb(new Error('Invalid file type. Only PDF and Word documents are allowed.'), false);
   }
 };
@@ -46,6 +57,8 @@ const upload = multer({
 
 // Error handling middleware for multer
 export const handleUploadError = (error, req, res, next) => {
+  console.error('Upload error:', error);
+  
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
@@ -68,7 +81,11 @@ export const handleUploadError = (error, req, res, next) => {
     });
   }
   
-  next(error);
+  return res.status(500).json({
+    success: false,
+    message: 'File upload failed',
+    error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+  });
 };
 
 export default upload;

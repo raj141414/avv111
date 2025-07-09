@@ -16,6 +16,10 @@ const generateOrderId = () => {
 // Create new order
 router.post('/', upload.array('files', 10), handleUploadError, validateOrder, async (req, res) => {
   try {
+    console.log('Creating new order...');
+    console.log('Request body:', req.body);
+    console.log('Uploaded files:', req.files?.map(f => ({ name: f.filename, original: f.originalname, size: f.size })));
+
     const {
       fullName,
       phoneNumber,
@@ -47,6 +51,8 @@ router.post('/', upload.array('files', 10), handleUploadError, validateOrder, as
       path: file.path
     }));
 
+    console.log('Processed files:', files);
+
     // Calculate total cost (you can implement your pricing logic here)
     let totalCost = 0;
     if (printType !== 'customPrint') {
@@ -63,7 +69,7 @@ router.post('/', upload.array('files', 10), handleUploadError, validateOrder, as
     }
 
     // Create order
-    const order = new Order({
+    const orderData = {
       orderId: generateOrderId(),
       fullName,
       phoneNumber,
@@ -79,17 +85,23 @@ router.post('/', upload.array('files', 10), handleUploadError, validateOrder, as
       files,
       totalCost,
       status: 'pending'
-    });
+    };
 
-    await order.save();
+    console.log('Creating order with data:', orderData);
+
+    const order = new Order(orderData);
+    const savedOrder = await order.save();
+
+    console.log('Order saved successfully:', savedOrder._id);
 
     res.status(201).json({
       success: true,
       message: 'Order created successfully',
       data: {
-        orderId: order.orderId,
-        totalCost: order.totalCost,
-        status: order.status
+        orderId: savedOrder.orderId,
+        totalCost: savedOrder.totalCost,
+        status: savedOrder.status,
+        _id: savedOrder._id
       }
     });
 
@@ -115,15 +127,19 @@ router.post('/', upload.array('files', 10), handleUploadError, validateOrder, as
 router.get('/:orderId', async (req, res) => {
   try {
     const { orderId } = req.params;
+    console.log('Searching for order:', orderId);
     
     const order = await Order.findOne({ orderId }).select('-files.path');
     
     if (!order) {
+      console.log('Order not found:', orderId);
       return res.status(404).json({
         success: false,
         message: 'Order not found'
       });
     }
+
+    console.log('Order found:', order._id);
 
     res.json({
       success: true,
@@ -134,7 +150,8 @@ router.get('/:orderId', async (req, res) => {
     console.error('Get order error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to retrieve order'
+      message: 'Failed to retrieve order',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -148,6 +165,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
     const sortBy = req.query.sortBy || 'orderDate';
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
 
+    console.log('Fetching orders with params:', { page, limit, status, sortBy, sortOrder });
+
     // Build query
     const query = {};
     if (status) {
@@ -156,6 +175,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // Get total count
     const total = await Order.countDocuments(query);
+    console.log('Total orders found:', total);
 
     // Get orders with pagination
     const orders = await Order.find(query)
@@ -163,6 +183,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       .sort({ [sortBy]: sortOrder })
       .skip((page - 1) * limit)
       .limit(limit);
+
+    console.log('Orders retrieved:', orders.length);
 
     res.json({
       success: true,
@@ -181,7 +203,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
     console.error('Get orders error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to retrieve orders'
+      message: 'Failed to retrieve orders',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -192,6 +215,8 @@ router.patch('/:orderId/status', authenticateAdmin, validateStatusUpdate, async 
     const { orderId } = req.params;
     const { status } = req.body;
 
+    console.log('Updating order status:', { orderId, status });
+
     const order = await Order.findOneAndUpdate(
       { orderId },
       { status, updatedAt: new Date() },
@@ -199,11 +224,14 @@ router.patch('/:orderId/status', authenticateAdmin, validateStatusUpdate, async 
     ).select('-files.path');
 
     if (!order) {
+      console.log('Order not found for status update:', orderId);
       return res.status(404).json({
         success: false,
         message: 'Order not found'
       });
     }
+
+    console.log('Order status updated successfully:', order._id);
 
     res.json({
       success: true,
@@ -215,7 +243,8 @@ router.patch('/:orderId/status', authenticateAdmin, validateStatusUpdate, async 
     console.error('Update order status error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update order status'
+      message: 'Failed to update order status',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -225,8 +254,11 @@ router.get('/:orderId/files/:fileName', authenticateAdmin, async (req, res) => {
   try {
     const { orderId, fileName } = req.params;
 
+    console.log('File download request:', { orderId, fileName });
+
     const order = await Order.findOne({ orderId });
     if (!order) {
+      console.log('Order not found for file download:', orderId);
       return res.status(404).json({
         success: false,
         message: 'Order not found'
@@ -235,6 +267,7 @@ router.get('/:orderId/files/:fileName', authenticateAdmin, async (req, res) => {
 
     const file = order.files.find(f => f.name === fileName);
     if (!file) {
+      console.log('File not found in order:', fileName);
       return res.status(404).json({
         success: false,
         message: 'File not found'
@@ -242,9 +275,11 @@ router.get('/:orderId/files/:fileName', authenticateAdmin, async (req, res) => {
     }
 
     const filePath = path.resolve(file.path);
+    console.log('Attempting to serve file:', filePath);
     
     // Check if file exists
     if (!await fs.pathExists(filePath)) {
+      console.log('File not found on disk:', filePath);
       return res.status(404).json({
         success: false,
         message: 'File not found on disk'
@@ -259,11 +294,14 @@ router.get('/:orderId/files/:fileName', authenticateAdmin, async (req, res) => {
     const fileStream = fs.createReadStream(filePath);
     fileStream.pipe(res);
 
+    console.log('File download started:', fileName);
+
   } catch (error) {
     console.error('Download file error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to download file'
+      message: 'Failed to download file',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -273,8 +311,11 @@ router.delete('/:orderId', authenticateAdmin, async (req, res) => {
   try {
     const { orderId } = req.params;
 
+    console.log('Deleting order:', orderId);
+
     const order = await Order.findOne({ orderId });
     if (!order) {
+      console.log('Order not found for deletion:', orderId);
       return res.status(404).json({
         success: false,
         message: 'Order not found'
@@ -285,6 +326,7 @@ router.delete('/:orderId', authenticateAdmin, async (req, res) => {
     for (const file of order.files) {
       try {
         await fs.remove(file.path);
+        console.log('File deleted:', file.path);
       } catch (fileError) {
         console.error('Error deleting file:', fileError);
       }
@@ -292,6 +334,7 @@ router.delete('/:orderId', authenticateAdmin, async (req, res) => {
 
     // Delete order from database
     await Order.deleteOne({ orderId });
+    console.log('Order deleted successfully:', orderId);
 
     res.json({
       success: true,
@@ -302,7 +345,8 @@ router.delete('/:orderId', authenticateAdmin, async (req, res) => {
     console.error('Delete order error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete order'
+      message: 'Failed to delete order',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
